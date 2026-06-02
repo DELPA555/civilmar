@@ -1,27 +1,21 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { format, addMonths, parseISO } from 'date-fns'
 import { ArrowLeft, Save, Calculator } from 'lucide-react'
 import { calcularPlanDePagos } from '@/lib/simulador'
+import { useContratos } from '@/hooks/useContratos'
+import { useEmprendimientos } from '@/hooks/useEmprendimientos'
+import { useClientes, type Cliente } from '@/hooks/useClientes'
+import { supabase } from '@/lib/supabase'
 import { fmt } from '@/lib/currency'
 import Header from '@/components/layout/Header'
 import { cn } from '@/utils/cn'
 
-// Mock data (mismos que Simulador)
-const EMPRENDIMIENTOS = [
-  { id: 'e1', nombre: 'Torre Norte — Constitución 1230' },
-  { id: 'e2', nombre: 'Costa Residences — Güemes 450' },
-  { id: 'e3', nombre: 'Parque San Martín — Lote B' },
-]
-const CLIENTES = [
-  { id: 'cl1', nombre: 'García, Roberto' }, { id: 'cl2', nombre: 'López, María' },
-  { id: 'cl3', nombre: 'Martínez, Juan' }, { id: 'cl4', nombre: 'Rodríguez SA' },
-  { id: 'cl5', nombre: 'González, Sofía' }, { id: 'cl6', nombre: 'Torres, Diego' },
-]
+interface Unidad { id: string; identificador: string; tipo?: string; estado: string }
 
 interface FormValues {
-  numero: string; emprendimientoId: string; unidad: string; clienteId: string
-  vendedor: string; tipo: string; moneda: 'USD' | 'ARS'
+  numero: string; emprendimientoId: string; unidadId: string; clienteId: string
+  tipo: string; moneda: 'USD' | 'ARS'
   precioTotal: number; senaMonto: number; senaFecha: string
   tramo1Meses: number; tramo1Inicio: string; tramo1ConCac: boolean
   tramo2Meses: number; tramo2TasaAnual: number; notas: string
@@ -30,15 +24,26 @@ interface FormValues {
 const hoy     = format(new Date(), 'yyyy-MM-dd')
 const proxMes = format(addMonths(new Date(), 1), 'yyyy-MM-dd')
 
+function nombreCliente(c: Cliente): string {
+  if (c.tipo === 'persona_juridica') return c.razon_social ?? c.nombre
+  return [c.apellido, c.nombre].filter(Boolean).join(', ')
+}
+
 export default function ContratoNuevo() {
   const navigate  = useNavigate()
   const location  = useLocation()
   const simData   = (location.state as { simulador?: Partial<FormValues> } | null)?.simulador
 
+  const { create }                        = useContratos()
+  const { data: emprendimientos }         = useEmprendimientos()
+  const { data: clientes }                = useClientes()
+  const [unidades, setUnidades]           = useState<Unidad[]>([])
+  const [saving,   setSaving]             = useState(false)
+
   const [form, setForm] = useState<FormValues>({
     numero: `${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100)}`,
     emprendimientoId: simData?.emprendimientoId ?? '',
-    unidad: '', clienteId: '', vendedor: '', tipo: 'boleto',
+    unidadId: '', clienteId: '', tipo: 'boleto',
     moneda: simData?.moneda ?? 'USD',
     precioTotal: Number(simData?.precioTotal ?? 0),
     senaMonto: Number((simData as Record<string, unknown>)?.sena ?? 0),
@@ -52,6 +57,36 @@ export default function ContratoNuevo() {
   })
 
   const F = (k: keyof FormValues, v: unknown) => setForm(p => ({ ...p, [k]: v }))
+
+  // Cargar unidades disponibles cuando cambia el emprendimiento
+  useEffect(() => {
+    if (!form.emprendimientoId) { setUnidades([]); F('unidadId', ''); return }
+    supabase.from('unidades')
+      .select('id, identificador, tipo, estado')
+      .eq('emprendimiento_id', form.emprendimientoId)
+      .in('estado', ['disponible', 'reservada'])
+      .order('identificador')
+      .then(({ data }) => { setUnidades(data ?? []); F('unidadId', '') })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.emprendimientoId])
+
+  // Prellenar precio desde la unidad seleccionada
+  useEffect(() => {
+    if (!form.unidadId) return
+    supabase.from('unidades')
+      .select('precio_lista_usd, precio_lista_ars, moneda_venta')
+      .eq('id', form.unidadId)
+      .single()
+      .then(({ data }) => {
+        if (!data) return
+        const precio = data.moneda_venta === 'ARS' ? data.precio_lista_ars : data.precio_lista_usd
+        if (precio) {
+          F('precioTotal', precio)
+          F('moneda', data.moneda_venta as 'USD' | 'ARS')
+        }
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.unidadId])
 
   const plan = useMemo(() => {
     if (!form.precioTotal || !form.tramo1Meses) return null
@@ -68,8 +103,61 @@ export default function ContratoNuevo() {
     } catch { return null }
   }, [form])
 
-  const fi = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary'
-  const lb = 'block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1'
+  const guardar = async () => {
+    if (!form.emprendimientoId || !form.unidadId || !form.clienteId || !form.precioTotal || !plan) return
+    setSaving(true)
+    try {
+      const contrato = await create({
+        numero:            form.numero,
+        emprendimiento_id: form.emprendimientoId,
+        unidad_id:         form.unidadId,
+        cliente_id:        form.clienteId,
+        tipo:              form.tipo as 'reserva' | 'boleto' | 'escritura' | 'cesion',
+        estado:            'vigente',
+        moneda:            form.moneda,
+        precio_total:      form.precioTotal,
+        sena_monto:        form.senaMonto,
+        sena_fecha:        form.senaFecha || undefined,
+        tramo1_meses:      form.tramo1Meses,
+        tramo1_cuota:      plan.resumen.cuotaTramo1,
+        tramo1_inicio:     form.tramo1Inicio,
+        tramo1_con_cac:    form.tramo1ConCac,
+        tramo2_meses:      form.tramo2Meses,
+        tramo2_cuota:      plan.resumen.cuotaTramo2,
+        tramo2_tasa_anual: form.tramo2TasaAnual,
+        total_tramo1:      plan.resumen.totalTramo1,
+        total_tramo2:      plan.resumen.totalTramo2,
+        fecha_firma:       hoy,
+        notas:             form.notas || undefined,
+      })
+
+      // Insertar cuotas generadas por el simulador
+      const cuotasInput = plan.cuotas.map(c => ({
+        contrato_id:       contrato.id,
+        numero_cuota:      c.numero,
+        tramo:             c.tramo,
+        fecha_vencimiento: format(c.fechaVencimiento, 'yyyy-MM-dd'),
+        monto_original:    c.montoOriginal,
+        estado:            (c.tramo === 'sena' ? 'pagada' : 'pendiente') as 'pendiente' | 'pagada',
+        mora_dias:         0,
+        mora_monto:        0,
+      }))
+      const { error: cuotasErr } = await supabase.from('cuotas').insert(cuotasInput)
+      if (cuotasErr) throw new Error(`Contrato creado pero error en cuotas: ${cuotasErr.message}`)
+
+      // Marcar la unidad como vendida
+      await supabase.from('unidades').update({ estado: 'vendida' }).eq('id', form.unidadId)
+
+      navigate(`/contratos/${contrato.id}`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error al guardar el contrato')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fi  = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary'
+  const lb  = 'block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1'
   const fmtM = (n: number) => fmt(n, form.moneda)
 
   return (
@@ -110,20 +198,26 @@ export default function ContratoNuevo() {
               <div><label className={lb}>Emprendimiento</label>
                 <select className={fi} value={form.emprendimientoId} onChange={e => F('emprendimientoId', e.target.value)}>
                   <option value="">— Seleccioná —</option>
-                  {EMPRENDIMIENTOS.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                  {emprendimientos.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
                 </select>
               </div>
-              <div><label className={lb}>Unidad</label><input className={fi} placeholder="Ej: 2B, Lote 5, PH 1..." value={form.unidad} onChange={e => F('unidad', e.target.value)} /></div>
+              <div><label className={lb}>Unidad</label>
+                <select className={fi} value={form.unidadId} onChange={e => F('unidadId', e.target.value)} disabled={!form.emprendimientoId}>
+                  <option value="">— {form.emprendimientoId ? 'Seleccioná unidad' : 'Primero elegí emprendimiento'} —</option>
+                  {unidades.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.identificador}{u.tipo ? ` (${u.tipo})` : ''} — {u.estado}
+                    </option>
+                  ))}
+                </select>
+                {form.emprendimientoId && unidades.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">Sin unidades disponibles en este emprendimiento</p>
+                )}
+              </div>
               <div><label className={lb}>Cliente</label>
                 <select className={fi} value={form.clienteId} onChange={e => F('clienteId', e.target.value)}>
                   <option value="">— Seleccioná —</option>
-                  {CLIENTES.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                </select>
-              </div>
-              <div><label className={lb}>Vendedor</label>
-                <select className={fi} value={form.vendedor} onChange={e => F('vendedor', e.target.value)}>
-                  <option value="">Sin asignar</option>
-                  <option>Lucía Herrera</option><option>Carlos Méndez</option>
+                  {clientes.map(c => <option key={c.id} value={c.id}>{nombreCliente(c)}</option>)}
                 </select>
               </div>
             </div>
@@ -172,11 +266,11 @@ export default function ContratoNuevo() {
             </div>
 
             <button
-              disabled={!form.emprendimientoId || !form.clienteId || !form.precioTotal}
-              onClick={() => { alert('Contrato guardado (conectar Supabase)'); navigate('/contratos') }}
+              disabled={saving || !form.emprendimientoId || !form.unidadId || !form.clienteId || !form.precioTotal || !plan}
+              onClick={guardar}
               className="btn-primary w-full py-3 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              <Save size={16} /> Crear contrato
+              <Save size={16} /> {saving ? 'Guardando...' : 'Crear contrato'}
             </button>
           </div>
 

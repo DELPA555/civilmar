@@ -237,11 +237,16 @@ function TabGeneral({ emp }: { emp: EmpConUnidades }) {
 
 // ── TAB 2: Etapas de obra ─────────────────────────────────────────────────────
 
-function EtapaUpdateModal({ etapa, onClose }: { etapa: MockEtapa; onClose: () => void }) {
+function EtapaUpdateModal({ etapa, onClose, onSave }: {
+  etapa: MockEtapa
+  onClose: () => void
+  onSave: (id: string, input: Partial<MockEtapa>) => Promise<void>
+}) {
   const [avance, setAvance] = useState(etapa.avance_porcentaje)
   const [estado, setEstado] = useState(etapa.estado)
   const [costo, setCosto]   = useState(etapa.costo_real)
   const [notas, setNotas]   = useState('')
+  const [saving, setSaving] = useState(false)
   const field = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary'
 
   return (
@@ -283,8 +288,15 @@ function EtapaUpdateModal({ etapa, onClose }: { etapa: MockEtapa; onClose: () =>
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
           <button onClick={onClose} className="btn-ghost">Cancelar</button>
-          <button onClick={() => { alert('Guardado (conectar Supabase)'); onClose() }} className="btn-primary">
-            Guardar cambios
+          <button disabled={saving} onClick={async () => {
+            setSaving(true)
+            try {
+              await onSave(etapa.id, { avance_porcentaje: avance, estado: estado as MockEtapa['estado'], costo_real: costo, notas: notas || undefined })
+              onClose()
+            } catch (e) { alert(e instanceof Error ? e.message : 'Error') }
+            finally { setSaving(false) }
+          }} className="btn-primary disabled:opacity-50">
+            {saving ? 'Guardando...' : 'Guardar cambios'}
           </button>
         </div>
       </div>
@@ -292,7 +304,10 @@ function EtapaUpdateModal({ etapa, onClose }: { etapa: MockEtapa; onClose: () =>
   )
 }
 
-function TabEtapas({ etapas }: { etapas: MockEtapa[] }) {
+function TabEtapas({ etapas, onUpdate }: {
+  etapas: MockEtapa[]
+  onUpdate: (id: string, input: Partial<MockEtapa>) => Promise<void>
+}) {
   const [editando, setEditando] = useState<MockEtapa | null>(null)
 
   const totalPresupuesto = etapas.reduce((s, e) => s + (e.presupuesto ?? 0), 0)
@@ -404,16 +419,21 @@ function TabEtapas({ etapas }: { etapas: MockEtapa[] }) {
         })}
       </div>
 
-      {editando && <EtapaUpdateModal etapa={editando} onClose={() => setEditando(null)} />}
+      {editando && <EtapaUpdateModal etapa={editando} onClose={() => setEditando(null)} onSave={onUpdate} />}
     </div>
   )
 }
 
 // ── TAB 3: Diario de obra ─────────────────────────────────────────────────────
 
-function NuevoDiarioModal({ onClose }: { onClose: () => void }) {
+function NuevoDiarioModal({ empId, onClose, onSave }: {
+  empId: string
+  onClose: () => void
+  onSave: (input: Omit<import('@/hooks/useEmprendimientos').DiarioObra, 'id' | 'created_at'>) => Promise<void>
+}) {
   const hoy = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({ fecha: hoy, clima: 'soleado', temp_min: '', temp_max: '', personal: '', tareas: '', materiales: '', incidentes: '', observaciones: '' })
+  const [saving, setSaving] = useState(false)
   const field = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary'
   const label = 'block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1'
 
@@ -476,10 +496,28 @@ function NuevoDiarioModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
           <button onClick={onClose} className="btn-ghost">Cancelar</button>
-          <button disabled={!form.tareas.trim() || !form.personal}
-            onClick={() => { alert('Guardado (conectar Supabase)'); onClose() }}
+          <button disabled={saving || !form.tareas.trim() || !form.personal}
+            onClick={async () => {
+              setSaving(true)
+              try {
+                await onSave({
+                  emprendimiento_id: empId,
+                  fecha: form.fecha,
+                  condiciones_clima: form.clima,
+                  temperatura_min: form.temp_min ? Number(form.temp_min) : undefined,
+                  temperatura_max: form.temp_max ? Number(form.temp_max) : undefined,
+                  personal_presente: Number(form.personal),
+                  tareas_realizadas: form.tareas,
+                  materiales_utilizados: form.materiales || undefined,
+                  incidentes: form.incidentes || undefined,
+                  observaciones: form.observaciones || undefined,
+                })
+                onClose()
+              } catch (e) { alert(e instanceof Error ? e.message : 'Error') }
+              finally { setSaving(false) }
+            }}
             className="btn-primary disabled:opacity-50">
-            Guardar registro
+            {saving ? 'Guardando...' : 'Guardar registro'}
           </button>
         </div>
       </div>
@@ -487,7 +525,11 @@ function NuevoDiarioModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function TabDiario({ diario }: { diario: DiarioEntry[] }) {
+function TabDiario({ empId, diario, onAdd }: {
+  empId: string
+  diario: DiarioEntry[]
+  onAdd: (input: Omit<import('@/hooks/useEmprendimientos').DiarioObra, 'id' | 'created_at'>) => Promise<void>
+}) {
   const [showNew, setShowNew] = useState(false)
 
   return (
@@ -561,7 +603,7 @@ function TabDiario({ diario }: { diario: DiarioEntry[] }) {
           </div>
         </div>
       )}
-      {showNew && <NuevoDiarioModal onClose={() => setShowNew(false)} />}
+      {showNew && <NuevoDiarioModal empId={empId} onClose={() => setShowNew(false)} onSave={onAdd} />}
     </div>
   )
 }
@@ -705,7 +747,7 @@ const ESTADO_EMP_CFG = {
 export default function EmprendimientoDetalle() {
   const { id } = useParams<{ id: string }>()
   const [tab, setTab] = useState<TabId>('general')
-  const { emprendimiento: emp, unidades, etapas, diario, loading } = useEmprendimientoDetalle(id)
+  const { emprendimiento: emp, unidades, etapas, diario, loading, updateEtapa, addDiario } = useEmprendimientoDetalle(id)
 
   if (loading) return (
     <div className="flex flex-col h-full">
@@ -795,8 +837,8 @@ export default function EmprendimientoDetalle() {
       {/* Contenido del tab */}
       <div className="flex-1 overflow-y-auto p-6">
         {tab === 'general'      && <TabGeneral emp={{ ...emp, unidades, etapas, diario, contratistas: [] }} />}
-        {tab === 'etapas'       && <TabEtapas etapas={etapas} />}
-        {tab === 'diario'       && <TabDiario diario={diario} />}
+        {tab === 'etapas'       && <TabEtapas etapas={etapas} onUpdate={updateEtapa} />}
+        {tab === 'diario'       && <TabDiario empId={emp.id} diario={diario} onAdd={addDiario} />}
         {tab === 'contratistas' && <TabContratistas contratistas={[]} />}
         {tab === 'documentos'   && <TabDocumentos />}
       </div>

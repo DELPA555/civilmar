@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { format } from 'date-fns'
+import { es } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { FileDown, FileText, TrendingUp, Users, Building2, DollarSign, Clock, BarChart3, RefreshCw, type LucideIcon } from 'lucide-react'
 import jsPDF from 'jspdf'
@@ -51,6 +54,7 @@ export default function Reportes() {
   const { data: contratos, loading: loadCo } = useContratos()
   const { data: emprendimientos, loading: loadEmp } = useEmprendimientos()
   const { data: cuotas, loading: loadCuotas } = useTodasLasCuotas()
+  const [clienteSelId, setClienteSelId] = useState('')
 
 
   // Rentabilidad por emprendimiento
@@ -301,15 +305,63 @@ export default function Reportes() {
         {/* 6. Estado de cuenta */}
         <ReportCard icon={DollarSign} title="Estado de cuenta por cliente" subtitle="Generá el PDF de cuenta corriente de un cliente" color="bg-teal-600">
           <div className="flex items-center gap-3">
-            <select className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+            <select
+              value={clienteSelId}
+              onChange={e => setClienteSelId(e.target.value)}
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              <option value="">— Seleccioná un cliente —</option>
               {contratos.filter((v,i,a)=>a.findIndex(c=>c.cliente_id===v.cliente_id)===i).map(c=>(
                 <option key={c.cliente_id} value={c.cliente_id}>
                   {c.cliente ? `${c.cliente.apellido??''}, ${c.cliente.nombre}`.replace(/^,\s*/,'') : c.cliente_id}
                 </option>
               ))}
             </select>
-            <button onClick={()=>alert('Generando PDF de estado de cuenta (implementar con datos reales)')}
-              className="btn-primary flex items-center gap-2 shrink-0">
+            <button
+              disabled={!clienteSelId}
+              onClick={() => {
+                const cliContratos = contratos.filter(c => c.cliente_id === clienteSelId)
+                const cliCuotas    = cuotas.filter(c => cliContratos.find(co => co.id === c.contrato_id))
+                const cliente      = cliContratos[0]?.cliente
+                const nombreCli    = cliente ? `${cliente.apellido??''}, ${cliente.nombre}`.replace(/^,\s*/,'') : clienteSelId
+                const doc = new jsPDF()
+                doc.setFillColor(26,58,92); doc.rect(0,0,210,20,'F')
+                doc.setTextColor(255); doc.setFontSize(13)
+                doc.text('Civilmar — Estado de cuenta',15,13)
+                doc.text(format(new Date(),'dd/MM/yyyy',{locale:es}),195,13,{align:'right'})
+                doc.setTextColor(0); doc.setFontSize(11)
+                doc.text(`Cliente: ${nombreCli}`,15,30)
+                autoTable(doc,{
+                  startY:36,
+                  head:[['Contrato','Emprendimiento','Total','Cuotas pag.','Vencidas','Estado']],
+                  body: cliContratos.map(c=>[
+                    c.numero,
+                    c.emprendimiento?.nombre??'—',
+                    `${c.moneda} ${c.precio_total.toLocaleString()}`,
+                    String(cliCuotas.filter(q=>q.contrato_id===c.id&&q.estado==='pagada').length),
+                    String(cliCuotas.filter(q=>q.contrato_id===c.id&&q.estado==='vencida').length),
+                    c.estado,
+                  ]),
+                  styles:{fontSize:8}, headStyles:{fillColor:[26,58,92],textColor:255},
+                  margin:{left:15,right:15},
+                })
+                const y = (doc as unknown as {lastAutoTable:{finalY:number}}).lastAutoTable.finalY+8
+                autoTable(doc,{
+                  startY:y,
+                  head:[['Contrato','N° cuota','Vencimiento','Monto','Estado']],
+                  body: cliCuotas.slice(0,50).map(c=>[
+                    c.contrato_numero??'',
+                    String(c.numero_cuota),
+                    c.fecha_vencimiento,
+                    `${c.moneda??'USD'} ${c.monto_original.toLocaleString()}`,
+                    c.estado,
+                  ]),
+                  styles:{fontSize:7}, headStyles:{fillColor:[45,90,142],textColor:255},
+                  alternateRowStyles:{fillColor:[248,249,250]},
+                  margin:{left:15,right:15},
+                })
+                doc.save(`estado_cuenta_${nombreCli.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`)
+              }}
+              className="btn-primary flex items-center gap-2 shrink-0 disabled:opacity-50">
               <FileText size={15}/> Generar PDF
             </button>
           </div>

@@ -6,6 +6,7 @@ import { ArrowLeft, FileDown, RefreshCw, AlertTriangle, CheckCircle, Clock, X } 
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { useContratoDetalle, type Contrato, type Cuota } from '@/hooks/useContratos'
+import { useIndiceCAC } from '@/hooks/useIndiceCAC'
 import { fmt } from '@/lib/currency'
 import Header from '@/components/layout/Header'
 import { cn } from '@/utils/cn'
@@ -17,9 +18,45 @@ const ESTADO_CUOTA: Record<string, { cls: string; label: string }> = {
   refinanciada: { cls: 'badge-warning', label: 'Refi.' },
 }
 
-function ActualizarCACModal({ onClose }: { onClose: () => void }) {
-  const [mes, setMes] = useState(format(new Date(), 'yyyy-MM'))
-  const [valor, setValor] = useState('')
+function ActualizarCACModal({ cuotas, actualizarCac, onClose }: {
+  cuotas: Cuota[]
+  actualizarCac: (id: string, monto: number, indice: number) => Promise<void>
+  onClose: () => void
+}) {
+  const { data: indices } = useIndiceCAC()
+  const [mes,    setMes]    = useState(format(new Date(), 'yyyy-MM'))
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+  const fi = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30'
+
+  const aplicar = async () => {
+    const [anio, mesNum] = mes.split('-').map(Number)
+    const indice = indices.find(i => i.anio === anio && i.mes === mesNum)
+    if (!indice) {
+      setResult(`No hay índice CAC cargado para ${mes}. Cargalo primero en Índice CAC.`)
+      return
+    }
+    if (!indice.variacion_mensual) {
+      setResult('El índice de ese período no tiene variación mensual calculada.')
+      return
+    }
+    const pendientes = cuotas.filter(c => c.tramo === 'tramo1' && c.estado === 'pendiente')
+    if (!pendientes.length) { setResult('No hay cuotas Tramo 1 pendientes para actualizar.'); return }
+
+    setSaving(true)
+    try {
+      for (const c of pendientes) {
+        const base      = c.monto_actualizado ?? c.monto_original
+        const nuevo     = Math.round(base * (1 + indice.variacion_mensual / 100) * 100) / 100
+        await actualizarCac(c.id, nuevo, indice.valor)
+      }
+      setResult(`✓ ${pendientes.length} cuota${pendientes.length > 1 ? 's' : ''} actualizadas — variación ${indice.variacion_mensual.toFixed(2)}% (${mes})`)
+    } catch (e) {
+      setResult(e instanceof Error ? e.message : 'Error al actualizar')
+    } finally {
+      setSaving(false) }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
@@ -28,21 +65,25 @@ function ActualizarCACModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
         <div className="px-6 py-5 space-y-4">
-          <p className="text-sm text-gray-600">Aplicará el índice CAC del período seleccionado a todas las cuotas ARS pendientes de este contrato.</p>
+          <p className="text-sm text-gray-600">Aplica el CAC del período a todas las cuotas T1 pendientes de este contrato.</p>
           <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Período a aplicar</label>
-            <input type="month" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" value={mes} onChange={e => setMes(e.target.value)} />
+            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Período</label>
+            <input type="month" className={fi} value={mes} onChange={e => { setMes(e.target.value); setResult(null) }} />
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Valor índice CAC ese mes</label>
-            <input type="number" placeholder="Ej: 1250.45" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" value={valor} onChange={e => setValor(e.target.value)} />
-          </div>
+          {result && (
+            <p className={cn('text-sm p-3 rounded-lg', result.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700')}>
+              {result}
+            </p>
+          )}
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
-          <button onClick={onClose} className="btn-ghost">Cancelar</button>
-          <button onClick={() => { alert('Cuotas actualizadas con CAC (conectar Supabase)'); onClose() }} className="btn-primary flex items-center gap-2">
-            <RefreshCw size={14} /> Aplicar CAC
-          </button>
+          <button onClick={onClose} className="btn-ghost">{result?.startsWith('✓') ? 'Cerrar' : 'Cancelar'}</button>
+          {!result?.startsWith('✓') && (
+            <button onClick={aplicar} disabled={saving} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+              <RefreshCw size={14} className={saving ? 'animate-spin' : ''} />
+              {saving ? 'Aplicando...' : 'Aplicar CAC'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -143,7 +184,7 @@ export default function ContratoDetalle() {
   const [showCac, setShowCac] = useState(false)
   const [pagoModal, setPagoModal] = useState<string | null>(null)
 
-  const { contrato, cuotas: rawCuotas, loading, registrarPago } = useContratoDetalle(id)
+  const { contrato, cuotas: rawCuotas, loading, registrarPago, actualizarCac } = useContratoDetalle(id)
 
   if (loading) return (
     <div className="flex flex-col h-full">
@@ -329,7 +370,7 @@ export default function ContratoDetalle() {
         </div>
       </div>
 
-      {showCac && <ActualizarCACModal onClose={() => setShowCac(false)} />}
+      {showCac && <ActualizarCACModal cuotas={cuotas} actualizarCac={actualizarCac} onClose={() => setShowCac(false)} />}
       {pagoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6">

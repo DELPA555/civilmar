@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Plus, MapPin, Calendar, ChevronRight, RefreshCw } from 'lucide-react'
+import { Building2, Plus, MapPin, Calendar, ChevronRight, RefreshCw, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useEmprendimientos, type Emprendimiento } from '@/hooks/useEmprendimientos'
@@ -28,6 +28,86 @@ const FILTROS = [
   { value: 'terminado', label: 'Terminados' },
   { value: 'entregado', label: 'Entregados' },
 ]
+
+// ── Modal Nueva Obra ──────────────────────────────────────────────────────────
+
+type EmpInput = Omit<Emprendimiento, 'id' | 'created_at' | 'updated_at' | 'unidades' | 'avance'>
+
+function NuevaObraModal({ onClose, onCreate }: { onClose: () => void; onCreate: (i: EmpInput) => Promise<unknown> }) {
+  const fi = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary'
+  const lb = 'block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1'
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    nombre: '', descripcion: '', direccion: '', localidad: 'Mar del Plata',
+    provincia: 'Buenos Aires', tipo: 'edificio', estado: 'en_proyecto',
+    fecha_inicio: format(new Date(), 'yyyy-MM-dd'),
+    fecha_fin_estimada: '', meses_obra: 24, total_unidades: 0,
+  })
+  const F = (k: string, v: unknown) => setForm(p => ({ ...p, [k]: v }))
+
+  const save = async () => {
+    if (!form.nombre.trim()) return
+    setSaving(true)
+    try {
+      await onCreate({
+        nombre: form.nombre, descripcion: form.descripcion, direccion: form.direccion,
+        localidad: form.localidad, provincia: form.provincia,
+        tipo: form.tipo as Emprendimiento['tipo'],
+        estado: form.estado as Emprendimiento['estado'],
+        fecha_inicio: form.fecha_inicio || undefined,
+        fecha_fin_estimada: form.fecha_fin_estimada || undefined,
+        meses_obra: Number(form.meses_obra),
+        total_unidades: 0,
+      } as EmpInput)
+      onClose()
+    } catch (e) { alert(e instanceof Error ? e.message : 'Error al guardar') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="font-bold text-gray-900 text-lg">Nueva obra</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div><label className={lb}>Nombre *</label><input className={fi} autoFocus value={form.nombre} onChange={e => F('nombre', e.target.value)} placeholder="Ej: Torre Norte" /></div>
+          <div><label className={lb}>Descripción</label><textarea className={fi} rows={2} value={form.descripcion} onChange={e => F('descripcion', e.target.value)} /></div>
+          <div><label className={lb}>Dirección</label><input className={fi} value={form.direccion} onChange={e => F('direccion', e.target.value)} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lb}>Localidad</label><input className={fi} value={form.localidad} onChange={e => F('localidad', e.target.value)} /></div>
+            <div><label className={lb}>Provincia</label><input className={fi} value={form.provincia} onChange={e => F('provincia', e.target.value)} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lb}>Tipo</label>
+              <select className={fi} value={form.tipo} onChange={e => F('tipo', e.target.value)}>
+                <option value="edificio">Edificio</option><option value="countries">Countries</option>
+                <option value="loteo">Loteo</option><option value="duplex">Dúplex</option><option value="otro">Otro</option>
+              </select>
+            </div>
+            <div><label className={lb}>Estado inicial</label>
+              <select className={fi} value={form.estado} onChange={e => F('estado', e.target.value)}>
+                <option value="en_proyecto">En proyecto</option><option value="en_obra">En obra</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={lb}>Inicio obra</label><input type="date" className={fi} value={form.fecha_inicio} onChange={e => F('fecha_inicio', e.target.value)} /></div>
+            <div><label className={lb}>Entrega estimada</label><input type="date" className={fi} value={form.fecha_fin_estimada} onChange={e => F('fecha_fin_estimada', e.target.value)} /></div>
+            <div><label className={lb}>Meses de obra</label><input type="number" min="1" className={fi} value={form.meses_obra} onChange={e => F('meses_obra', e.target.value)} /></div>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+          <button onClick={onClose} className="btn-ghost">Cancelar</button>
+          <button onClick={save} disabled={saving || !form.nombre.trim()} className="btn-primary disabled:opacity-50">
+            {saving ? 'Guardando...' : 'Crear emprendimiento'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function EmpCard({ emp }: { emp: Emprendimiento }) {
   const navigate  = useNavigate()
@@ -96,8 +176,9 @@ function EmpCard({ emp }: { emp: Emprendimiento }) {
 }
 
 export default function Emprendimientos() {
-  const [filtro, setFiltro] = useState('todos')
-  const { data, loading, error, reload } = useEmprendimientos()
+  const [filtro,   setFiltro]   = useState('todos')
+  const [showNew,  setShowNew]  = useState(false)
+  const { data, loading, error, reload, create } = useEmprendimientos()
 
   const lista = filtro === 'todos' ? data : data.filter(e => e.estado === filtro)
 
@@ -107,7 +188,7 @@ export default function Emprendimientos() {
         title="Emprendimientos"
         subtitle={`${data.length} proyectos`}
         actions={
-          <button onClick={() => alert('Formulario nueva obra (conectar formulario)')} className="btn-primary flex items-center gap-2">
+          <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2">
             <Plus size={16} /> Nueva obra
           </button>
         }
@@ -149,6 +230,7 @@ export default function Emprendimientos() {
           </div>
         )}
       </div>
+      {showNew && <NuevaObraModal onClose={() => setShowNew(false)} onCreate={create} />}
     </div>
   )
 }

@@ -10,7 +10,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     title:    'Civilmar ERP',
-    icon:     path.join(__dirname, 'icon.png'),
+    icon:     path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: {
       preload:          path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

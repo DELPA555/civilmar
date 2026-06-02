@@ -50,6 +50,7 @@
     "appId": "com.civilmar.erp",
     "productName": "Civilmar ERP",
     "copyright": "Copyright © 2026 Civilmar SA",
+    "icon": "electron/icon.ico",
     "directories": {
       "output": "dist-installer"
     },
@@ -70,6 +71,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Civilmar ERP",
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico",
       "installerHeader": "electron/icon.ico",
       "runAfterFinish": true,
       "installerLanguages": [

@@ -21,6 +21,12 @@ import Profesionales     from '@/pages/Profesionales'
 import IndiceCAC         from '@/pages/IndiceCAC'
 import Reportes          from '@/pages/Reportes'
 import Configuracion     from '@/pages/Configuracion'
+import Documentos        from '@/pages/Documentos'
+import PresupuestoObra   from '@/pages/PresupuestoObra'
+import Panol             from '@/pages/Panol'
+import Jornadas          from '@/pages/Jornadas'
+import Licitaciones      from '@/pages/Licitaciones'
+import Usuarios          from '@/pages/Usuarios'
 
 export default function App() {
   return (
@@ -92,6 +98,22 @@ export default function App() {
               <ProtectedRoute modulo="indice-cac"><IndiceCAC /></ProtectedRoute>
             } />
 
+            <Route path="documentos" element={
+              <ProtectedRoute modulo="documentos"><Documentos /></ProtectedRoute>
+            } />
+            <Route path="presupuesto-obra" element={
+              <ProtectedRoute modulo="presupuesto-obra"><PresupuestoObra /></ProtectedRoute>
+            } />
+            <Route path="panol" element={
+              <ProtectedRoute modulo="panol"><Panol /></ProtectedRoute>
+            } />
+            <Route path="jornadas" element={
+              <ProtectedRoute modulo="jornadas"><Jornadas /></ProtectedRoute>
+            } />
+            <Route path="licitaciones" element={
+              <ProtectedRoute modulo="licitaciones"><Licitaciones /></ProtectedRoute>
+            } />
+
             <Route path="reportes" element={
               <ProtectedRoute modulo="reportes"><Reportes /></ProtectedRoute>
             } />
@@ -99,6 +121,11 @@ export default function App() {
             <Route path="configuracion" element={
               <ProtectedRoute modulo="configuracion" roles={['admin', 'gerente']}>
                 <Configuracion />
+              </ProtectedRoute>
+            } />
+            <Route path="usuarios" element={
+              <ProtectedRoute modulo="usuarios" roles={['admin']}>
+                <Usuarios />
               </ProtectedRoute>
             } />
 

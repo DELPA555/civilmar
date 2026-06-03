@@ -121,9 +121,9 @@ export function useAuth() {
 // Permisos por rol
 const PERMISOS: Record<Rol, string[]> = {
   admin:          ['*'],
-  gerente:        ['dashboard','emprendimientos','simulador','clientes','contratos','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','configuracion'],
-  vendedor:       ['dashboard','simulador','emprendimientos','clientes','contratos'],
-  administrativo: ['dashboard','cobros','proveedores','contratistas','profesionales','indice-cac','reportes'],
+  gerente:        ['dashboard','emprendimientos','simulador','clientes','contratos','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','configuracion','documentos','presupuesto-obra','panol','jornadas','licitaciones'],
+  vendedor:       ['dashboard','simulador','emprendimientos','clientes','contratos','documentos'],
+  administrativo: ['dashboard','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','panol','jornadas','licitaciones'],
   readonly:       ['dashboard','emprendimientos','clientes','contratos','cobros','reportes'],
 }
 

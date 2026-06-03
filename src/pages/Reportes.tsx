@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { supabase } from '@/lib/supabase'
 import { FileDown, FileText, TrendingUp, Users, Building2, DollarSign, Clock, BarChart3, RefreshCw, type LucideIcon } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -56,6 +57,95 @@ export default function Reportes() {
   const { data: cuotas, loading: loadCuotas } = useTodasLasCuotas()
   const [clienteSelId, setClienteSelId] = useState('')
 
+  // ── Datos extra para reportes avanzados ──────────────────────────────────────
+
+  // Etapas (para desvío de costos y Gantt)
+  const [etapas, setEtapas] = useState<{emprendimiento_id:string;nombre:string;presupuesto?:number;costo_real:number;estado:string;avance_porcentaje:number;porcentaje_obra?:number}[]>([])
+
+  useState(() => {
+    supabase.from('etapas_obra').select('emprendimiento_id, nombre, presupuesto, costo_real, estado, avance_porcentaje, porcentaje_obra').then(({ data }) => setEtapas(data ?? []))
+  })
+
+  // Ranking de clientes por volumen comprado
+  const rankingClientes = Object.values(
+    contratos.filter(c => c.estado !== 'cancelado').reduce<Record<string, {nombre:string; contratos:number; volumen:number}>>((acc, c) => {
+      const cid = c.cliente_id
+      const nombre = c.cliente ? `${c.cliente.apellido??''}, ${c.cliente.nombre}`.replace(/^,\s*/,'') : cid
+      if (!acc[cid]) acc[cid] = { nombre, contratos: 0, volumen: 0 }
+      acc[cid].contratos++
+      acc[cid].volumen += c.precio_total
+      return acc
+    }, {})
+  ).sort((a, b) => b.volumen - a.volumen)
+
+  const categCliente = (volumen: number) =>
+    volumen >= 500_000 ? { label: 'VIP', cls: 'bg-amber-100 text-amber-800' } :
+    volumen >= 200_000 ? { label: 'Premium', cls: 'bg-purple-100 text-purple-800' } :
+                         { label: 'Standard', cls: 'badge-info' }
+
+  // Aging de deuda: agrupar cuotas vencidas por antigüedad
+  const ahora = Date.now()
+  type AgingBucket = '0-30' | '31-60' | '61-90' | '+90'
+  const agingBuckets: Record<AgingBucket, {qty: number; monto: number}> = {
+    '0-30': {qty:0,monto:0}, '31-60': {qty:0,monto:0},
+    '61-90': {qty:0,monto:0}, '+90': {qty:0,monto:0},
+  }
+  const agingClientes: Record<string, { nombre:string; '0-30':number; '31-60':number; '61-90':number; '+90':number; total:number }> = {}
+
+  cuotas.filter(c => c.estado === 'vencida').forEach(c => {
+    const dias = Math.floor((ahora - new Date(c.fecha_vencimiento).getTime()) / 86400000)
+    const bucket: AgingBucket = dias <= 30 ? '0-30' : dias <= 60 ? '31-60' : dias <= 90 ? '61-90' : '+90'
+    agingBuckets[bucket].qty++
+    agingBuckets[bucket].monto += c.monto_original
+    const nombre = c.cliente || 'Desconocido'
+    if (!agingClientes[nombre]) agingClientes[nombre] = { nombre, '0-30':0, '31-60':0, '61-90':0, '+90':0, total:0 }
+    agingClientes[nombre][bucket] += c.monto_original
+    agingClientes[nombre].total += c.monto_original
+  })
+  const agingDetalleData = Object.values(agingClientes).sort((a,b) => b.total - a.total)
+
+  const agingScore = (row: typeof agingDetalleData[0]) => {
+    const pctGrave = (row['+90'] + row['61-90']) / (row.total || 1)
+    return pctGrave > 0.5 ? 'rojo' : pctGrave > 0.2 ? 'amarillo' : 'verde'
+  }
+
+  // Flujo 24 meses proyectado
+  const flujoProy = Array.from({ length: 24 }, (_, i) => {
+    const d = new Date(); d.setMonth(d.getMonth() + i)
+    const mesStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    const ingresos = cuotas.filter(c => c.fecha_vencimiento?.startsWith(mesStr) && c.estado !== 'pagada')
+      .reduce((s,c) => s + c.monto_original, 0)
+    return { mes: format(d, 'MMM yy', { locale: es }), ingresos: Math.round(ingresos/1000), egresos: 0 }
+  })
+
+  // Rentabilidad por m² (usa presupuesto_obra si existe)
+  const rentM2 = emprendimientos.map(e => {
+    const cliContr = contratos.filter(c => c.emprendimiento_id === e.id)
+    const totalVentas = cliContr.reduce((s,c) => s + c.precio_total, 0)
+    const etapasEmp = etapas.filter(et => et.emprendimiento_id === e.id)
+    const costoReal = etapasEmp.reduce((s,et) => s + et.costo_real, 0)
+    return {
+      nombre: e.nombre,
+      totalVentas,
+      costoReal,
+      margen: totalVentas - costoReal,
+      pctMargen: totalVentas > 0 ? ((totalVentas - costoReal) / totalVentas * 100).toFixed(1) : '—',
+    }
+  })
+
+  // ── Exportadores nuevos ───────────────────────────────────────────────────────
+
+  const exportRankingExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(rankingClientes.map((r,i) => ({ Ranking: i+1, Cliente: r.nombre, Contratos: r.contratos, 'Volumen (USD)': r.volumen, Categoría: categCliente(r.volumen).label })))
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Ranking')
+    XLSX.writeFile(wb, 'ranking_clientes_civilmar.xlsx')
+  }
+
+  const exportAgingExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(agingDetalleData.map(r => ({ Cliente: r.nombre, '0-30d': r['0-30'], '31-60d': r['31-60'], '61-90d': r['61-90'], '+90d': r['+90'], Total: r.total, Score: agingScore(r).toUpperCase() })))
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Aging')
+    XLSX.writeFile(wb, 'aging_deuda_civilmar.xlsx')
+  }
 
   // Rentabilidad por emprendimiento
   const rentData = emprendimientos.map(e => {
@@ -366,6 +456,169 @@ export default function Reportes() {
             </button>
           </div>
           <p className="text-xs text-gray-400">Incluye contratos, cuotas pagadas, pendientes y vencidas del cliente.</p>
+        </ReportCard>
+
+        {/* 7. Rentabilidad por m² */}
+        <ReportCard icon={Building2} title="Rentabilidad real por m²" subtitle="Márgenes y costos por emprendimiento" color="bg-teal-700" loading={loadCo||loadEmp}>
+          <table className="w-full text-sm">
+            <thead><tr className="bg-gray-50 text-xs text-gray-500 font-semibold uppercase tracking-wide">
+              <th className="px-3 py-2 text-left">Emprendimiento</th>
+              <th className="px-3 py-2 text-right">Ventas (U$D)</th>
+              <th className="px-3 py-2 text-right">Costo real</th>
+              <th className="px-3 py-2 text-right">Margen</th>
+              <th className="px-3 py-2 text-right">% Margen</th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {rentM2.map((r, i) => (
+                <tr key={i} className={i%2===0?'bg-white':'bg-gray-50/40'}>
+                  <td className="px-3 py-2 font-medium text-gray-800">{r.nombre}</td>
+                  <td className="px-3 py-2 text-right font-mono text-primary font-semibold">{fmtUSD(r.totalVentas)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-600">{fmtUSD(r.costoReal)}</td>
+                  <td className={cn('px-3 py-2 text-right font-mono font-bold', r.margen >= 0 ? 'text-success' : 'text-danger')}>{fmtUSD(r.margen)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <span className={cn('badge text-[9px]', r.margen >= 0 ? 'badge-success' : 'badge-danger')}>{r.pctMargen}%</span>
+                  </td>
+                </tr>
+              ))}
+              {!rentM2.length && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Sin datos</td></tr>}
+            </tbody>
+          </table>
+        </ReportCard>
+
+        {/* 8. Desvío de costos */}
+        <ReportCard icon={TrendingUp} title="Desvío de costos por etapa" subtitle="Presupuesto original vs. costo real" color="bg-orange-600" loading={loadEmp}>
+          {etapas.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sin etapas cargadas</p>
+          ) : (
+            <div className="space-y-2">
+              {etapas.map((et, i) => {
+                const pres = et.presupuesto ?? 0
+                const real = et.costo_real ?? 0
+                const desvio = pres > 0 ? ((real - pres) / pres * 100) : 0
+                const color = Math.abs(desvio) <= 5 ? 'bg-green-500' : Math.abs(desvio) <= 15 ? 'bg-amber-400' : 'bg-red-500'
+                const semaforo = Math.abs(desvio) <= 5 ? '🟢' : Math.abs(desvio) <= 15 ? '🟡' : '🔴'
+                const emp = emprendimientos.find(e => e.id === et.emprendimiento_id)
+                return (
+                  <div key={i} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{et.nombre}</p>
+                        <p className="text-[10px] text-gray-400">{emp?.nombre ?? '—'}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-base">{semaforo}</span>
+                        <p className={cn('text-xs font-bold', desvio > 0 ? 'text-danger' : desvio < 0 ? 'text-success' : 'text-gray-500')}>
+                          {desvio > 0 ? '+' : ''}{desvio.toFixed(1)}%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                      <div>Presupuesto: <span className="font-mono font-semibold">${pres.toLocaleString('es-AR')}</span></div>
+                      <div>Costo real: <span className={cn('font-mono font-semibold', real > pres ? 'text-danger' : 'text-success')}>${real.toLocaleString('es-AR')}</span></div>
+                    </div>
+                    {pres > 0 && (
+                      <div className="mt-1.5 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full', color)} style={{ width: `${Math.min(100, (real/pres)*100)}%` }}/>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </ReportCard>
+
+        {/* 9. Flujo de fondos 24 meses */}
+        <ReportCard icon={BarChart3} title="Flujo de fondos proyectado — 24 meses" subtitle="Ingresos de cuotas pendientes por mes" color="bg-indigo-700" loading={loadCuotas}>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={flujoProy} barSize={14}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+              <XAxis dataKey="mes" tick={{fontSize:9,fill:'#9ca3af'}} interval={1}/>
+              <YAxis tick={{fontSize:9,fill:'#9ca3af'}} tickFormatter={v=>`${v}k`}/>
+              <Tooltip formatter={(v:number)=>[`${v}k U$D`]}/>
+              <Bar dataKey="ingresos" name="Ingresos proyectados" fill="#4f46e5" radius={[3,3,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="text-[10px] text-gray-400 text-center mt-2">Basado en cuotas pendientes y vencidas según fecha de vencimiento</p>
+        </ReportCard>
+
+        {/* 10. Ranking de clientes */}
+        <ReportCard icon={Users} title="Ranking de clientes" subtitle="Por volumen total de compras" color="bg-pink-700" loading={loadCo} onExcel={exportRankingExcel}>
+          <div className="space-y-2">
+            {rankingClientes.slice(0,10).map((r, i) => {
+              const cat = categCliente(r.volumen)
+              return (
+                <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl border border-gray-100 bg-gray-50 hover:bg-primary/5 transition-colors">
+                  <span className={cn('w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
+                    i===0?'bg-amber-400 text-white':i===1?'bg-gray-400 text-white':i===2?'bg-amber-700 text-white':'bg-gray-200 text-gray-600')}>
+                    {i+1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{r.nombre}</p>
+                    <p className="text-[10px] text-gray-400">{r.contratos} contrato{r.contratos!==1?'s':''}</p>
+                  </div>
+                  <span className={cn('badge text-[9px]', cat.cls)}>{cat.label}</span>
+                  <p className="text-sm font-bold text-primary font-mono shrink-0">{fmtUSD(r.volumen)}</p>
+                </div>
+              )
+            })}
+            {!rankingClientes.length && <p className="text-sm text-gray-400 text-center py-4">Sin datos de clientes</p>}
+          </div>
+        </ReportCard>
+
+        {/* 11. Aging de deuda */}
+        <ReportCard icon={Clock} title="Aging de deuda — Antigüedad por cliente" subtitle="Corriente / 30 / 60 / 90 / +90 días" color="bg-red-700" loading={loadCuotas} onExcel={exportAgingExcel}>
+          {/* Resumen buckets */}
+          <div className="grid grid-cols-4 gap-2 mb-4">
+            {(Object.entries(agingBuckets) as [string, {qty:number;monto:number}][]).map(([bucket, v]) => (
+              <div key={bucket} className={cn('p-2.5 rounded-xl text-center border',
+                bucket === '+90' ? 'bg-red-50 border-red-200' : bucket === '61-90' ? 'bg-orange-50 border-orange-200' : bucket === '31-60' ? 'bg-amber-50 border-amber-200' : 'bg-yellow-50 border-yellow-200')}>
+                <p className="text-[10px] font-bold text-gray-500 uppercase">{bucket} días</p>
+                <p className={cn('text-sm font-bold mt-0.5',
+                  bucket === '+90' ? 'text-red-700' : bucket === '61-90' ? 'text-orange-700' : bucket === '31-60' ? 'text-amber-700' : 'text-yellow-700')}>
+                  {fmtUSD(v.monto)}
+                </p>
+                <p className="text-[9px] text-gray-400">{v.qty} cuota{v.qty!==1?'s':''}</p>
+              </div>
+            ))}
+          </div>
+          {agingDetalleData.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">Sin deuda vencida 🎉</p>
+          ) : (
+            <div className="overflow-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="bg-gray-50 text-gray-500 font-semibold uppercase tracking-wide">
+                  <th className="px-3 py-2 text-left">Cliente</th>
+                  <th className="px-3 py-2 text-right">0–30d</th>
+                  <th className="px-3 py-2 text-right">31–60d</th>
+                  <th className="px-3 py-2 text-right">61–90d</th>
+                  <th className="px-3 py-2 text-right">+90d</th>
+                  <th className="px-3 py-2 text-right">Total</th>
+                  <th className="px-3 py-2 text-center">Riesgo</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-50">
+                  {agingDetalleData.map((r, i) => {
+                    const score = agingScore(r)
+                    return (
+                      <tr key={i} className={i%2===0?'bg-white':'bg-gray-50/40'}>
+                        <td className="px-3 py-2 font-medium text-gray-800">{r.nombre}</td>
+                        <td className="px-3 py-2 text-right font-mono text-yellow-700">{r['0-30']>0?fmtUSD(r['0-30']):'—'}</td>
+                        <td className="px-3 py-2 text-right font-mono text-amber-700">{r['31-60']>0?fmtUSD(r['31-60']):'—'}</td>
+                        <td className="px-3 py-2 text-right font-mono text-orange-700">{r['61-90']>0?fmtUSD(r['61-90']):'—'}</td>
+                        <td className="px-3 py-2 text-right font-mono text-red-700 font-bold">{r['+90']>0?fmtUSD(r['+90']):'—'}</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-gray-900">{fmtUSD(r.total)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={cn('badge text-[9px]', score==='rojo'?'badge-danger':score==='amarillo'?'badge-warning':'badge-success')}>
+                            {score === 'rojo' ? '🔴 Alto' : score === 'amarillo' ? '🟡 Medio' : '🟢 Bajo'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </ReportCard>
 
       </div>

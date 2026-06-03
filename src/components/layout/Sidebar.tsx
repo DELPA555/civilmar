@@ -2,7 +2,8 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, Calculator, Users, FileText,
   CreditCard, Truck, HardHat, UserCog, TrendingUp, Settings,
-  BarChart3, LogOut, type LucideIcon,
+  BarChart3, LogOut, Package, CalendarDays,
+  ShoppingCart, FileSignature, UserCog as UserAdmin, type LucideIcon,
 } from 'lucide-react'
 import { useAuth, puedeAcceder } from '@/context/AuthContext'
 import { cn } from '@/utils/cn'
@@ -34,17 +35,28 @@ const GRUPOS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Administración',
     items: [
-      { to: '/proveedores',   label: 'Proveedores',    icon: Truck,    modulo: 'proveedores' },
-      { to: '/contratistas',  label: 'Contratistas',   icon: HardHat,  modulo: 'contratistas' },
-      { to: '/profesionales', label: 'Profesionales',  icon: UserCog,  modulo: 'profesionales' },
-      { to: '/indice-cac',    label: 'Índice CAC',     icon: TrendingUp, modulo: 'indice-cac' },
+      { to: '/proveedores',   label: 'Proveedores',    icon: Truck,       modulo: 'proveedores' },
+      { to: '/contratistas',  label: 'Contratistas',   icon: HardHat,     modulo: 'contratistas' },
+      { to: '/profesionales', label: 'Profesionales',  icon: UserCog,     modulo: 'profesionales' },
+      { to: '/indice-cac',    label: 'Índice CAC',     icon: TrendingUp,  modulo: 'indice-cac' },
+      { to: '/licitaciones',  label: 'Licitaciones',   icon: ShoppingCart,modulo: 'licitaciones' },
+    ],
+  },
+  {
+    label: 'Obra',
+    items: [
+      { to: '/presupuesto-obra', label: 'Presupuesto APU', icon: Calculator,  modulo: 'presupuesto-obra' },
+      { to: '/panol',            label: 'Pañol / Depósito',icon: Package,     modulo: 'panol' },
+      { to: '/jornadas',         label: 'Jornadas',        icon: CalendarDays,modulo: 'jornadas' },
     ],
   },
   {
     label: 'Reportes',
     items: [
-      { to: '/reportes',      label: 'Reportes',       icon: BarChart3, modulo: 'reportes' },
-      { to: '/configuracion', label: 'Configuración',  icon: Settings,  modulo: 'configuracion' },
+      { to: '/documentos',    label: 'Documentos',     icon: FileSignature, modulo: 'documentos' },
+      { to: '/reportes',      label: 'Reportes',       icon: BarChart3,     modulo: 'reportes' },
+      { to: '/usuarios',      label: 'Usuarios',       icon: UserAdmin,     modulo: 'usuarios' },
+      { to: '/configuracion', label: 'Configuración',  icon: Settings,      modulo: 'configuracion' },
     ],
   },
 ]

@@ -727,9 +727,221 @@ function TabDocumentos() {
 
 // ── Página principal ──────────────────────────────────────────────────────────
 
+// ── TAB GANTT ─────────────────────────────────────────────────────────────────
+
+function TabGantt({ etapas }: { etapas: MockEtapa[] }) {
+  const hoy    = new Date()
+  const sorted = [...etapas].sort((a, b) => a.orden - b.orden)
+
+  if (!sorted.length) return (
+    <div className="card flex flex-col items-center py-12 text-gray-400">
+      <TrendingUp size={36} className="mb-3 text-gray-200" />
+      <p className="font-medium">Sin etapas cargadas para mostrar el cronograma</p>
+    </div>
+  )
+
+  // Rango del gráfico: min fecha inicio estimada → max fecha fin estimada/real
+  const toDate = (s: string | undefined) => s ? new Date(s) : null
+  const allDates: Date[] = sorted.flatMap(e => [
+    toDate(e.fecha_inicio_estimada), toDate(e.fecha_fin_estimada),
+    toDate(e.fecha_inicio_real), toDate(e.fecha_fin_real),
+  ].filter(Boolean) as Date[])
+
+  if (!allDates.length) return <div className="card text-gray-400 text-sm text-center py-10">Sin fechas configuradas en las etapas</div>
+
+  const minD = new Date(Math.min(...allDates.map(d => d.getTime())))
+  const maxD = new Date(Math.max(...allDates.map(d => d.getTime()), hoy.getTime()))
+
+  // Extender rango 2 semanas a cada lado
+  minD.setDate(minD.getDate() - 14)
+  maxD.setDate(maxD.getDate() + 14)
+
+  const dayPct = (date: Date) => ((date.getTime() - minD.getTime()) / (maxD.getTime() - minD.getTime())) * 100
+  const todayPct = dayPct(hoy)
+
+  // Meses para el eje X
+  const months: { label: string; pct: number }[] = []
+  let cur = new Date(minD.getFullYear(), minD.getMonth(), 1)
+  while (cur <= maxD) {
+    months.push({ label: format(cur, 'MMM yy', { locale: es }), pct: dayPct(cur) })
+    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)
+  }
+
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
+
+  return (
+    <div className="space-y-4">
+      <div className="card overflow-x-auto">
+        <p className="text-xs font-bold text-primary uppercase tracking-widest mb-4">Cronograma Gantt — Estimado vs. Real</p>
+
+        {/* Leyenda */}
+        <div className="flex gap-4 mb-4 text-[10px] text-gray-500 flex-wrap">
+          <span className="flex items-center gap-1.5"><span className="w-4 h-2.5 rounded bg-blue-400 inline-block"/>Estimado</span>
+          <span className="flex items-center gap-1.5"><span className="w-4 h-2.5 rounded bg-green-500 inline-block"/>Real (en tiempo)</span>
+          <span className="flex items-center gap-1.5"><span className="w-4 h-2.5 rounded bg-red-400 inline-block"/>Real (con retraso)</span>
+          <span className="flex items-center gap-1.5"><span className="w-0.5 h-3 bg-red-500 inline-block"/>Hoy</span>
+        </div>
+
+        {/* SVG Gantt */}
+        <div className="relative min-w-[600px]" style={{ position: 'relative' }}>
+          <svg
+            width="100%"
+            viewBox={`0 0 1000 ${sorted.length * 48 + 40}`}
+            className="overflow-visible"
+            onMouseLeave={() => setTooltip(null)}
+          >
+            {/* Fondo grilla */}
+            {months.map((m, i) => (
+              <g key={i}>
+                <line x1={`${m.pct}%`} y1="0" x2={`${m.pct}%`} y2={`${sorted.length * 48 + 20}`}
+                  stroke="#e5e7eb" strokeWidth="1" strokeDasharray="3,3" />
+                <text x={`${m.pct + 0.5}%`} y="14" fontSize="9" fill="#9ca3af" dominantBaseline="middle">{m.label}</text>
+              </g>
+            ))}
+
+            {/* Línea de hoy */}
+            {todayPct >= 0 && todayPct <= 100 && (
+              <g>
+                <line x1={`${todayPct}%`} y1="0" x2={`${todayPct}%`} y2={`${sorted.length * 48 + 20}`}
+                  stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4,3" />
+                <text x={`${todayPct + 0.3}%`} y="10" fontSize="8" fill="#ef4444">HOY</text>
+              </g>
+            )}
+
+            {/* Etapas */}
+            {sorted.map((etapa, i) => {
+              const y = 24 + i * 48
+              const fi_est = toDate(etapa.fecha_inicio_estimada)
+              const ff_est = toDate(etapa.fecha_fin_estimada)
+              const fi_real = toDate(etapa.fecha_inicio_real)
+              const ff_real = toDate(etapa.fecha_fin_real)
+              const enRetraso = etapa.estado === 'con_retraso' || (ff_est && !ff_real && hoy > ff_est)
+
+              return (
+                <g key={etapa.id}>
+                  {/* Label etapa */}
+                  <text x="0" y={y + 8} fontSize="9" fill="#374151" fontWeight="500"
+                    className="select-none" style={{ maxWidth: '120px' }}>
+                    {etapa.nombre.slice(0, 22)}{etapa.nombre.length > 22 ? '…' : ''}
+                  </text>
+
+                  {/* Barra estimada */}
+                  {fi_est && ff_est && (
+                    <rect
+                      x={`${Math.max(0, dayPct(fi_est))}%`}
+                      y={y + 2}
+                      width={`${Math.max(0.5, dayPct(ff_est) - dayPct(fi_est))}%`}
+                      height="10"
+                      rx="3"
+                      fill="#93c5fd"
+                      opacity="0.7"
+                      onMouseEnter={e => {
+                        const r = (e.currentTarget as SVGElement).getBoundingClientRect()
+                        setTooltip({ text: `${etapa.nombre} — Estimado: ${format(fi_est,'dd/MM/yyyy')} → ${format(ff_est,'dd/MM/yyyy')}`, x: r.x, y: r.y - 30 })
+                      }}
+                    />
+                  )}
+
+                  {/* Barra real */}
+                  {fi_real && (
+                    <rect
+                      x={`${Math.max(0, dayPct(fi_real))}%`}
+                      y={y + 14}
+                      width={`${Math.max(0.5, dayPct(ff_real ?? hoy) - dayPct(fi_real))}%`}
+                      height="10"
+                      rx="3"
+                      fill={enRetraso ? '#f87171' : '#4ade80'}
+                      onMouseEnter={e => {
+                        const r = (e.currentTarget as SVGElement).getBoundingClientRect()
+                        const texto = ff_real
+                          ? `${etapa.nombre} — Real: ${format(fi_real,'dd/MM/yyyy')} → ${format(ff_real,'dd/MM/yyyy')}`
+                          : `${etapa.nombre} — Real: ${format(fi_real,'dd/MM/yyyy')} (en curso ${etapa.avance_porcentaje}%)`
+                        setTooltip({ text: texto, x: r.x, y: r.y - 30 })
+                      }}
+                    />
+                  )}
+
+                  {/* % avance */}
+                  <text x={`${Math.min(99, Math.max(0.5, (fi_est ? dayPct(fi_est) : 0) + 0.5))}%`}
+                    y={y + 38} fontSize="8" fill="#6b7280">
+                    {etapa.avance_porcentaje}%
+                    {etapa.estado === 'terminada' && ' ✓'}
+                    {etapa.estado === 'con_retraso' && ' ⚠'}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+
+          {/* Tooltip */}
+          {tooltip && (
+            <div className="fixed z-50 bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none max-w-xs"
+              style={{ left: tooltip.x, top: tooltip.y }}>
+              {tooltip.text}
+            </div>
+          )}
+        </div>
+
+        {/* Tabla resumen */}
+        <div className="mt-6 overflow-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="table-header">
+              <th className="px-3 py-2 text-left">Etapa</th>
+              <th className="px-3 py-2 text-center">Estado</th>
+              <th className="px-3 py-2 text-center">Inicio est.</th>
+              <th className="px-3 py-2 text-center">Fin est.</th>
+              <th className="px-3 py-2 text-center">Inicio real</th>
+              <th className="px-3 py-2 text-center">Fin real</th>
+              <th className="px-3 py-2 text-center">Avance</th>
+              <th className="px-3 py-2 text-center">Desvío</th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {sorted.map(e => {
+                const fi_est  = toDate(e.fecha_inicio_estimada)
+                const ff_est  = toDate(e.fecha_fin_estimada)
+                const ff_real = toDate(e.fecha_fin_real)
+                const desvio  = ff_est && ff_real
+                  ? Math.ceil((ff_real.getTime() - ff_est.getTime()) / 86400000)
+                  : ff_est && !ff_real && e.estado !== 'pendiente'
+                    ? Math.ceil((hoy.getTime() - ff_est.getTime()) / 86400000)
+                    : null
+                return (
+                  <tr key={e.id}>
+                    <td className="px-3 py-2 font-medium text-gray-800">{e.nombre}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={cn('badge text-[9px]', ESTADO_ETAPA_CFG[e.estado as keyof typeof ESTADO_ETAPA_CFG]?.cls ?? 'badge-gray')}>
+                        {ESTADO_ETAPA_CFG[e.estado as keyof typeof ESTADO_ETAPA_CFG]?.label ?? e.estado}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center text-gray-500">{fi_est ? format(fi_est,'dd/MM/yy') : '—'}</td>
+                    <td className="px-3 py-2 text-center text-gray-500">{ff_est ? format(ff_est,'dd/MM/yy') : '—'}</td>
+                    <td className="px-3 py-2 text-center text-gray-500">{toDate(e.fecha_inicio_real) ? format(toDate(e.fecha_inicio_real)!,'dd/MM/yy') : '—'}</td>
+                    <td className="px-3 py-2 text-center text-gray-500">{ff_real ? format(ff_real,'dd/MM/yy') : '—'}</td>
+                    <td className="px-3 py-2 text-center font-semibold">{e.avance_porcentaje}%</td>
+                    <td className="px-3 py-2 text-center">
+                      {desvio === null ? '—' : desvio === 0 ? (
+                        <span className="text-green-600 font-semibold">En tiempo</span>
+                      ) : desvio > 0 ? (
+                        <span className="text-red-600 font-semibold">+{desvio}d</span>
+                      ) : (
+                        <span className="text-green-600 font-semibold">{desvio}d</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const TABS = [
   { id: 'general',      label: 'General',     icon: Home },
   { id: 'etapas',       label: 'Etapas',      icon: TrendingUp },
+  { id: 'cronograma',   label: 'Cronograma',  icon: Calendar },
   { id: 'diario',       label: 'Diario',      icon: ClipboardList },
   { id: 'contratistas', label: 'Contratistas',icon: HardHat },
   { id: 'documentos',   label: 'Documentos',  icon: FolderOpen },
@@ -838,6 +1050,7 @@ export default function EmprendimientoDetalle() {
       <div className="flex-1 overflow-y-auto p-6">
         {tab === 'general'      && <TabGeneral emp={{ ...emp, unidades, etapas, diario, contratistas: [] }} />}
         {tab === 'etapas'       && <TabEtapas etapas={etapas} onUpdate={updateEtapa} />}
+        {tab === 'cronograma'   && <TabGantt etapas={etapas} />}
         {tab === 'diario'       && <TabDiario empId={emp.id} diario={diario} onAdd={addDiario} />}
         {tab === 'contratistas' && <TabContratistas contratistas={[]} />}
         {tab === 'documentos'   && <TabDocumentos />}

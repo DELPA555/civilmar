@@ -121,10 +121,10 @@ export function useAuth() {
 // Permisos por rol
 const PERMISOS: Record<Rol, string[]> = {
   admin:          ['*'],
-  gerente:        ['dashboard','emprendimientos','simulador','clientes','contratos','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','configuracion','documentos','presupuesto-obra','panol','jornadas','licitaciones'],
-  vendedor:       ['dashboard','simulador','emprendimientos','clientes','contratos','documentos'],
-  administrativo: ['dashboard','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','panol','jornadas','licitaciones'],
-  readonly:       ['dashboard','emprendimientos','clientes','contratos','cobros','reportes'],
+  gerente:        ['dashboard','emprendimientos','simulador','clientes','contratos','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','configuracion','documentos','presupuesto-obra','panol','jornadas','licitaciones','alertas','comparador','documentacion-legal','notificaciones'],
+  vendedor:       ['dashboard','simulador','emprendimientos','clientes','contratos','documentos','alertas'],
+  administrativo: ['dashboard','cobros','proveedores','contratistas','profesionales','indice-cac','reportes','panol','jornadas','licitaciones','alertas','documentacion-legal','notificaciones'],
+  readonly:       ['dashboard','emprendimientos','clientes','contratos','cobros','reportes','alertas'],
 }
 
 export function puedeAcceder(rol: Rol, modulo: string): boolean {

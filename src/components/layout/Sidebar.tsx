@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Building2, Calculator, Users, FileText,
   CreditCard, Truck, HardHat, UserCog, TrendingUp, Settings,
   BarChart3, LogOut, Package, CalendarDays,
-  ShoppingCart, FileSignature, UserCog as UserAdmin, type LucideIcon,
+  ShoppingCart, FileSignature, UserCog as UserAdmin,
+  Bell, GitCompareArrows, FolderLock, MessageCircle, type LucideIcon,
 } from 'lucide-react'
 import { useAuth, puedeAcceder } from '@/context/AuthContext'
 import { cn } from '@/utils/cn'
@@ -53,10 +54,14 @@ const GRUPOS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Reportes',
     items: [
-      { to: '/documentos',    label: 'Documentos',     icon: FileSignature, modulo: 'documentos' },
-      { to: '/reportes',      label: 'Reportes',       icon: BarChart3,     modulo: 'reportes' },
-      { to: '/usuarios',      label: 'Usuarios',       icon: UserAdmin,     modulo: 'usuarios' },
-      { to: '/configuracion', label: 'Configuración',  icon: Settings,      modulo: 'configuracion' },
+      { to: '/alertas',             label: 'Alertas',            icon: Bell,             modulo: 'alertas' },
+      { to: '/comparador',          label: 'Comparador',         icon: GitCompareArrows, modulo: 'comparador' },
+      { to: '/documentacion-legal', label: 'Docs. Legales',      icon: FolderLock,       modulo: 'documentacion-legal' },
+      { to: '/notificaciones',      label: 'Notificaciones',     icon: MessageCircle,    modulo: 'notificaciones' },
+      { to: '/documentos',          label: 'Documentos PDF',     icon: FileSignature,    modulo: 'documentos' },
+      { to: '/reportes',            label: 'Reportes',           icon: BarChart3,        modulo: 'reportes' },
+      { to: '/usuarios',            label: 'Usuarios',           icon: UserAdmin,        modulo: 'usuarios' },
+      { to: '/configuracion',       label: 'Configuración',      icon: Settings,         modulo: 'configuracion' },
     ],
   },
 ]

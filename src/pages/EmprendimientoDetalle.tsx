@@ -938,8 +938,202 @@ function TabGantt({ etapas }: { etapas: MockEtapa[] }) {
   )
 }
 
+// ── TAB MAPA INTERACTIVO SVG ──────────────────────────────────────────────────
+
+function TabMapaInteractivo({ unidades, onUpdateUnidad }: {
+  unidades: MockUnidad[]
+  onUpdateUnidad: (id: string, input: Partial<MockUnidad>) => Promise<void>
+}) {
+  const [filtroEstado, setFiltroEstado] = useState<string | null>(null)
+  const [hoveredId, setHoveredId]       = useState<string | null>(null)
+  const [selectedId, setSelectedId]     = useState<string | null>(null)
+  const [fullscreen, setFullscreen]     = useState(false)
+  const [reservando, setReservando]     = useState(false)
+
+  // Agrupar por planta
+  const plantas = [...new Set(unidades.map(u => u.planta))].sort((a, b) => (b ?? -99) - (a ?? -99))
+  const [pisoActivo, setPisoActivo] = useState<number | undefined>(plantas[0])
+
+  const unidsFiltradas = unidades.filter(u => {
+    if (filtroEstado && u.estado !== filtroEstado) return false
+    return true
+  })
+
+  const unidsPiso = pisoActivo !== undefined
+    ? unidsFiltradas.filter(u => u.planta === pisoActivo)
+    : unidsFiltradas.filter(u => u.planta == null)
+
+  const selected = unidades.find(u => u.id === selectedId)
+
+  const COLORS = {
+    disponible:    { fill: '#e6f4ec', stroke: '#2d7a4f', text: '#2d7a4f' },
+    reservada:     { fill: '#fef9e7', stroke: '#b8860b', text: '#b8860b' },
+    vendida:       { fill: '#e8f0fc', stroke: '#2d5a8e', text: '#2d5a8e' },
+    escriturada:   { fill: '#f3f4f6', stroke: '#6b7280', text: '#6b7280' },
+    no_disponible: { fill: '#fde8e8', stroke: '#c0392b', text: '#c0392b' },
+  }
+
+  // Grid SVG: max 4 columnas
+  const cols = Math.min(unidsPiso.length, 4)
+  const cellW = 110, cellH = 80, pad = 10
+  const svgW = cols * (cellW + pad) + pad
+  const rows = Math.ceil(unidsPiso.length / cols)
+  const svgH = rows * (cellH + pad) + pad
+
+  const handleReservar = async () => {
+    if (!selected || selected.estado !== 'disponible') return
+    setReservando(true)
+    try {
+      await onUpdateUnidad(selected.id, { estado: 'reservada' as MockUnidad['estado'] })
+      setSelectedId(null)
+    } finally { setReservando(false) }
+  }
+
+  return (
+    <div className={cn('space-y-4', fullscreen && 'fixed inset-0 z-50 bg-white p-6 overflow-auto')}>
+      {/* Controles */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Selector de piso */}
+        {plantas.length > 1 && (
+          <div className="flex items-center gap-1">
+            {plantas.map(p => (
+              <button key={p} onClick={() => setPisoActivo(p)}
+                className={cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                  pisoActivo === p ? 'bg-primary text-white border-primary' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>
+                {p === -1 ? 'Sub' : p === 10 ? 'PH' : `P${p}`}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Filtro por estado */}
+        <div className="flex gap-1 ml-auto">
+          {Object.entries(COLORS).map(([estado, col]) => (
+            <button key={estado} onClick={() => setFiltroEstado(f => f === estado ? null : estado)}
+              title={estado.replace('_', ' ')}
+              className={cn('w-5 h-5 rounded border-2 transition-all', filtroEstado === estado && 'ring-2 ring-primary ring-offset-1')}
+              style={{ background: col.fill, borderColor: col.stroke }} />
+          ))}
+        </div>
+        <button onClick={() => setFullscreen(f => !f)}
+          className="text-xs text-gray-500 hover:text-primary border border-gray-200 px-2.5 py-1 rounded-lg transition-colors">
+          {fullscreen ? '↙ Salir' : '↗ Pantalla completa'}
+        </button>
+      </div>
+
+      <div className="flex gap-4 min-h-0">
+        {/* SVG mapa */}
+        <div className="flex-1 overflow-auto bg-gray-50 rounded-xl border border-gray-200 p-2">
+          {unidsPiso.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-gray-400 text-sm">Sin unidades en este piso</div>
+          ) : (
+            <svg width={svgW} height={svgH} className="min-w-full">
+              {unidsPiso.map((u, idx) => {
+                const col = idx % cols
+                const row = Math.floor(idx / cols)
+                const x = pad + col * (cellW + pad)
+                const y = pad + row * (cellH + pad)
+                const cfg = COLORS[u.estado as keyof typeof COLORS] ?? COLORS.disponible
+                const isHov = hoveredId === u.id
+                const isSel = selectedId === u.id
+                const isDim = filtroEstado && u.estado !== filtroEstado
+
+                return (
+                  <g key={u.id}
+                    onMouseEnter={() => setHoveredId(u.id)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    onClick={() => setSelectedId(isSel ? null : u.id)}
+                    style={{ cursor: 'pointer', opacity: isDim ? 0.25 : 1 }}>
+                    <rect
+                      x={x} y={y} width={cellW} height={cellH} rx={8}
+                      fill={cfg.fill}
+                      stroke={isSel ? '#1a3a5c' : isHov ? cfg.stroke : cfg.stroke}
+                      strokeWidth={isSel ? 2.5 : isHov ? 2 : 1.5}
+                      style={{ filter: isHov ? 'drop-shadow(0 2px 8px rgba(0,0,0,0.12))' : 'none', transition: 'all 0.15s' }}
+                    />
+                    <text x={x + cellW / 2} y={y + 22} textAnchor="middle" fontSize={14} fontWeight="bold" fill={cfg.text}>
+                      {u.identificador}
+                    </text>
+                    {u.tipo && (
+                      <text x={x + cellW / 2} y={y + 38} textAnchor="middle" fontSize={9} fill="#9ca3af">
+                        {u.tipo}
+                      </text>
+                    )}
+                    {u.metros_cubiertos && (
+                      <text x={x + cellW / 2} y={y + 52} textAnchor="middle" fontSize={9} fill={cfg.text}>
+                        {u.metros_cubiertos} m²
+                      </text>
+                    )}
+                    <text x={x + cellW / 2} y={y + 67} textAnchor="middle" fontSize={9} fill={cfg.text}
+                      fontWeight={500} textDecoration={u.estado === 'vendida' ? 'none' : 'none'}>
+                      {u.estado.replace('_', ' ')}
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
+          )}
+        </div>
+
+        {/* Panel detalle */}
+        {selected && (
+          <div className="w-56 shrink-0 card space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-gray-900">Unidad {selected.identificador}</span>
+              <button onClick={() => setSelectedId(null)} className="text-gray-400 hover:text-gray-600">
+                <Plus size={14} className="rotate-45" />
+              </button>
+            </div>
+            {[
+              ['Tipo',    selected.tipo ?? '—'],
+              ['Planta',  selected.planta === -1 ? 'Subsuelo' : selected.planta != null ? `Piso ${selected.planta}` : '—'],
+              ['M² cub.', selected.metros_cubiertos ? `${selected.metros_cubiertos} m²` : '—'],
+              ['Ambientes', selected.ambientes ? `${selected.ambientes} amb.` : '—'],
+              ['Estado',  selected.estado.replace('_', ' ')],
+            ].map(([l, v]) => (
+              <div key={l} className="flex justify-between text-xs">
+                <span className="text-gray-400">{l}</span>
+                <span className="text-gray-800 font-medium">{v}</span>
+              </div>
+            ))}
+            {selected.precio_usd && (
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-400">Precio</span>
+                <span className="font-bold text-primary">U$D {selected.precio_usd.toLocaleString()}</span>
+              </div>
+            )}
+            {selected.cliente && (
+              <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-2 py-1.5">
+                👤 {selected.cliente}
+                {selected.contrato_numero && <div className="text-gray-400">Ctto: {selected.contrato_numero}</div>}
+              </div>
+            )}
+            {selected.estado === 'disponible' && (
+              <button onClick={handleReservar} disabled={reservando}
+                className="btn-primary w-full text-xs py-2 disabled:opacity-50">
+                {reservando ? 'Reservando...' : '🔒 Marcar como reservada'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Leyenda */}
+      <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+        {Object.entries(COLORS).map(([estado, col]) => (
+          <span key={estado} className="flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rounded border" style={{ background: col.fill, borderColor: col.stroke }} />
+            {estado.replace('_', ' ')}
+          </span>
+        ))}
+        <span className="text-gray-300 ml-2">· Click para ver detalle</span>
+      </div>
+    </div>
+  )
+}
+
 const TABS = [
   { id: 'general',      label: 'General',     icon: Home },
+  { id: 'mapa',         label: 'Mapa',         icon: Home },
   { id: 'etapas',       label: 'Etapas',      icon: TrendingUp },
   { id: 'cronograma',   label: 'Cronograma',  icon: Calendar },
   { id: 'diario',       label: 'Diario',      icon: ClipboardList },
@@ -959,7 +1153,7 @@ const ESTADO_EMP_CFG = {
 export default function EmprendimientoDetalle() {
   const { id } = useParams<{ id: string }>()
   const [tab, setTab] = useState<TabId>('general')
-  const { emprendimiento: emp, unidades, etapas, diario, loading, updateEtapa, addDiario } = useEmprendimientoDetalle(id)
+  const { emprendimiento: emp, unidades, etapas, diario, loading, updateEtapa, addDiario, updateUnidad } = useEmprendimientoDetalle(id)
 
   if (loading) return (
     <div className="flex flex-col h-full">
@@ -1049,6 +1243,7 @@ export default function EmprendimientoDetalle() {
       {/* Contenido del tab */}
       <div className="flex-1 overflow-y-auto p-6">
         {tab === 'general'      && <TabGeneral emp={{ ...emp, unidades, etapas, diario, contratistas: [] }} />}
+        {tab === 'mapa'         && <TabMapaInteractivo unidades={unidades} onUpdateUnidad={updateUnidad} />}
         {tab === 'etapas'       && <TabEtapas etapas={etapas} onUpdate={updateEtapa} />}
         {tab === 'cronograma'   && <TabGantt etapas={etapas} />}
         {tab === 'diario'       && <TabDiario empId={emp.id} diario={diario} onAdd={addDiario} />}

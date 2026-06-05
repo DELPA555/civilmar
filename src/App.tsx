@@ -25,16 +25,22 @@ import Documentos        from '@/pages/Documentos'
 import PresupuestoObra   from '@/pages/PresupuestoObra'
 import Panol             from '@/pages/Panol'
 import Jornadas          from '@/pages/Jornadas'
-import Licitaciones      from '@/pages/Licitaciones'
-import Usuarios          from '@/pages/Usuarios'
+import Licitaciones           from '@/pages/Licitaciones'
+import Usuarios               from '@/pages/Usuarios'
+import Alertas                from '@/pages/Alertas'
+import Comparador             from '@/pages/Comparador'
+import DocumentacionLegal     from '@/pages/DocumentacionLegal'
+import Notificaciones         from '@/pages/Notificaciones'
+import InversorDashboard      from '@/pages/InversorDashboard'
 
 export default function App() {
   return (
     <AuthProvider>
       <HashRouter>
         <Routes>
-          {/* Ruta pública */}
+          {/* Rutas públicas */}
           <Route path="/login" element={<Login />} />
+          <Route path="/inversores/:token" element={<InversorDashboard />} />
 
           {/* Rutas protegidas — requieren auth */}
           <Route path="/" element={
@@ -116,6 +122,19 @@ export default function App() {
 
             <Route path="reportes" element={
               <ProtectedRoute modulo="reportes"><Reportes /></ProtectedRoute>
+            } />
+
+            <Route path="alertas" element={
+              <ProtectedRoute modulo="alertas"><Alertas /></ProtectedRoute>
+            } />
+            <Route path="comparador" element={
+              <ProtectedRoute modulo="comparador" roles={['admin','gerente']}><Comparador /></ProtectedRoute>
+            } />
+            <Route path="documentacion-legal" element={
+              <ProtectedRoute modulo="documentacion-legal"><DocumentacionLegal /></ProtectedRoute>
+            } />
+            <Route path="notificaciones" element={
+              <ProtectedRoute modulo="notificaciones"><Notificaciones /></ProtectedRoute>
             } />
 
             <Route path="configuracion" element={
